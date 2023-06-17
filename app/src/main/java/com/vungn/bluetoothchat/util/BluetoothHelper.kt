@@ -3,6 +3,7 @@ package com.vungn.bluetoothchat.util
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import com.vungn.bluetoothchat.data.BluetoothMessage
 import com.vungn.bluetoothchat.data.ConnectionResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,7 @@ interface BluetoothHelper {
     fun refreshDiscovery()
     fun startServer(): Flow<ConnectionResult>
     fun connectToServer(device: BluetoothDevice): Flow<ConnectionResult>
+    suspend fun tryToSendMessage(message: String): BluetoothMessage?
     fun closeConnections()
     fun release()
 }

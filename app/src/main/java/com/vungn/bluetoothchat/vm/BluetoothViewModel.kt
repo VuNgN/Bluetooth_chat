@@ -14,5 +14,6 @@ interface BluetoothViewModel {
     fun refresh()
     fun launchServer()
     fun connectToServer(device: BluetoothDevice)
+    fun sendMessage(message: String)
     fun disconnect()
 }

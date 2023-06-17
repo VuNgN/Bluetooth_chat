@@ -9,6 +9,7 @@ import com.vungn.bluetoothchat.data.ConnectionResult
 import com.vungn.bluetoothchat.util.BluetoothHelper
 import com.vungn.bluetoothchat.vm.BluetoothViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -57,7 +59,7 @@ class BluetoothViewModelImpl @Inject constructor(private val bluetoothHelper: Bl
     }
 
     override fun launchServer() {
-        _data.update { it.copy(isConnecting = true) }
+        _data.update { bluetoothData -> bluetoothData.copy(isConnecting = true) }
         deviceConnectionJob = bluetoothHelper.startServer().listen()
     }
 
@@ -68,8 +70,21 @@ class BluetoothViewModelImpl @Inject constructor(private val bluetoothHelper: Bl
     override fun disconnect() {
         deviceConnectionJob?.cancel()
         bluetoothHelper.closeConnections()
-        _data.update {
-            it.copy(isConnecting = false, isConnected = false)
+        _data.update { bluetoothData ->
+            bluetoothData.copy(isConnecting = false, isConnected = false)
+        }
+    }
+
+    override fun sendMessage(message: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bluetoothMessage = bluetoothHelper.tryToSendMessage(message)
+            if (bluetoothMessage != null) {
+                _data.update { bluetoothData ->
+                    bluetoothData.copy(messages = bluetoothData.messages + bluetoothMessage)
+                }
+            } else {
+                _errorMessage.emit("Message sending failed")
+            }
         }
     }
 
@@ -83,15 +98,22 @@ class BluetoothViewModelImpl @Inject constructor(private val bluetoothHelper: Bl
         when (result) {
             is ConnectionResult.ConnectionEstablished -> {
                 Log.d(TAG, "Server connect success")
-                _data.update {
-                    it.copy(isConnected = true, isConnecting = false)
+                _data.update { bluetoothData ->
+                    bluetoothData.copy(isConnected = true, isConnecting = false)
+                }
+            }
+
+            is ConnectionResult.TransferSuccess -> {
+                Log.d(TAG, "Message transferring success")
+                _data.update { bluetoothData ->
+                    bluetoothData.copy(messages = bluetoothData.messages + result.message)
                 }
             }
 
             is ConnectionResult.Error -> {
                 Log.e(TAG, "Server connect failure")
-                _data.update {
-                    it.copy(isConnected = false, isConnecting = false)
+                _data.update { bluetoothData ->
+                    bluetoothData.copy(isConnected = false, isConnecting = false)
                 }
                 _errorMessage.emit(result.message)
             }
@@ -100,8 +122,8 @@ class BluetoothViewModelImpl @Inject constructor(private val bluetoothHelper: Bl
         Log.e(TAG, "Job flow ConnectionResult failure", e)
         _errorMessage.emit(e.message)
         bluetoothHelper.closeConnections()
-        _data.update {
-            it.copy(isConnected = false, isConnecting = false)
+        _data.update { bluetoothData ->
+            bluetoothData.copy(isConnected = false, isConnecting = false)
         }
     }.launchIn(viewModelScope)
 

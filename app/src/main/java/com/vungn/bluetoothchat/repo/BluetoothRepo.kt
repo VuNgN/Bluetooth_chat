@@ -9,15 +9,20 @@ import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.IntentFilter
 import android.util.Log
+import com.vungn.bluetoothchat.data.BluetoothMessage
 import com.vungn.bluetoothchat.data.ConnectionResult
 import com.vungn.bluetoothchat.receiver.BluetoothReceiver
+import com.vungn.bluetoothchat.util.BluetoothDataTransferService
 import com.vungn.bluetoothchat.util.BluetoothHelper
+import com.vungn.bluetoothchat.util.toByteArray
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import java.io.IOException
@@ -52,6 +57,7 @@ class BluetoothRepo constructor(private val context: Context) : BluetoothHelper 
     private val _pairedDevices = MutableStateFlow(setOf<BluetoothDevice>())
     private var _currentServerSocket: BluetoothServerSocket? = null
     private var _currentClientSocket: BluetoothSocket? = null
+    private var _dataTransferService: BluetoothDataTransferService? = null
 
     init {
         val intent = IntentFilter().also {
@@ -114,7 +120,13 @@ class BluetoothRepo constructor(private val context: Context) : BluetoothHelper 
                 null
             }
             emit(ConnectionResult.ConnectionEstablished)
-            _currentServerSocket?.also {
+            _currentClientSocket?.also { socket ->
+                BluetoothDataTransferService(socket).also { service ->
+                    _dataTransferService = service
+                    emitAll(service.listenForIncomingMessage().map { bluetoothMessage ->
+                        ConnectionResult.TransferSuccess(bluetoothMessage)
+                    })
+                }
                 _currentServerSocket?.close()
                 shouldLoop = false
             }
@@ -130,6 +142,12 @@ class BluetoothRepo constructor(private val context: Context) : BluetoothHelper 
             try {
                 socket.connect()
                 emit(ConnectionResult.ConnectionEstablished)
+                BluetoothDataTransferService(socket).also { service ->
+                    _dataTransferService = service
+                    emitAll(service.listenForIncomingMessage().map { bluetoothMessage ->
+                        ConnectionResult.TransferSuccess(bluetoothMessage)
+                    })
+                }
             } catch (e: IOException) {
                 Log.e(TAG, "connectToServer", e)
                 socket.close()
@@ -138,6 +156,21 @@ class BluetoothRepo constructor(private val context: Context) : BluetoothHelper 
             }
         }
     }.onCompletion { closeConnections() }.flowOn(Dispatchers.IO)
+
+    override suspend fun tryToSendMessage(message: String): BluetoothMessage? {
+        if (_dataTransferService == null) {
+            return null
+        }
+        val bluetoothMessage = BluetoothMessage(
+            message = message, sender = _bluetoothAdapter.name ?: "Unknown name", isFromLocal = true
+        )
+        _dataTransferService?.sendMessage(bluetoothMessage.toByteArray()).let { isSend ->
+            if (isSend == true) {
+                return bluetoothMessage
+            }
+        }
+        return null
+    }
 
     private fun updatePairDevices() {
         _pairedDevices.update { _bluetoothAdapter.bondedDevices }
